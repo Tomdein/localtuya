@@ -1,0 +1,42 @@
+{
+    "aubess_smart_switch_1_gang": {
+        "functions": [
+            {
+                "code": "switch_1",
+                "dp_id": 1,
+                "type": "Boolean",
+                "values": "{}"
+            },
+            {
+                "code": "countdown_1",
+                "dp_id": 9,
+                "type": "Integer",
+                "values": "{\"unit\":\"s\",\"min\":0,\"max\":86400,\"scale\":0,\"step\":1}"
+            },
+            {
+                "code": "relay_status",
+                "dp_id": 38,
+                "type": "Enum",
+                "values": "{\"range\":[\"0\":\"OFF\",\"1\":\"ON\",\"2\":\"Remember last status\"]}"
+            },
+            {
+                "code": "random_time",
+                "dp_id": 42,
+                "type": "String",
+                "values": "{\"maxlen\":255}"
+            },
+            {
+                "code": "cycle_time",
+                "dp_id": 43,
+                "type": "String",
+                "values": "{\"maxlen\":255}"
+            },
+            {
+                "code": "switch_inching",
+                "dp_id": 44,
+                "type": "String",
+                "values": "{\"maxlen\":255}"
+            }
+        ]
+    }
+}
