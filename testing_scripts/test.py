@@ -17,7 +17,11 @@ async def main():
 
     await asyncio.wait({task_connect})
 
-    await asyncio.sleep(60)
+    await asyncio.sleep(10)
+
+    await device.update_dps()
+
+    await asyncio.sleep(20)
 
     # await asyncio.wait_for(on_connected_future, timeout=10)
 

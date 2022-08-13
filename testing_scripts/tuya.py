@@ -1,8 +1,6 @@
 import asyncio
-from asyncio.log import logger
 import base64
 import binascii
-from contextlib import ContextDecorator
 import json
 import logging
 import struct
@@ -94,6 +92,7 @@ PROTOCOL_33_HEADER = PROTOCOL_VERSION_BYTES_33 + 12 * b"\x00"
 SET = "set"
 STATUS = "status"
 HEARTBEAT = "heartbeat"
+DP_QUERY_NEW = "dp_query_new"
 UPDATEDPS = "updatedps"  # Request refresh of DPS
 
 TUYA_HEADER_FMT = ">4I"
@@ -166,17 +165,18 @@ class AESCipher:
         self.logger = logger
         self.block_size = 16
 
-        self.logger.debug(f"Creating ECB_AES128 cipher using device_key")
+        self.logger.debug("Creating ECB_AES128 cipher using device_key")
         self.cipher = Cipher(algorithms.AES(key), modes.ECB(), default_backend())
 
     def set_session_key(self, session_key: bytes):
-        self.logger.debug(f"Changing ECB_AES128 cipher to use session_key")
+        """ """
+        self.logger.debug("Changing ECB_AES128 cipher to use session_key")
         self.cipher = Cipher(algorithms.AES(session_key), modes.ECB(), default_backend())
 
     def encrypt(self, raw: bytes, use_base64: bool=True, padding: bool = True) -> bytes:
         """Encrypt json data to be sent to device."""
         encryptor = self.cipher.encryptor()
-        raw = self._pad(raw) if padding == True and len(raw) != 0 else raw
+        raw = self._pad(raw) if padding is True and len(raw) != 0 else raw
         crypted_text = encryptor.update(raw) + encryptor.finalize()
         return base64.b64encode(crypted_text) if use_base64 else crypted_text
 
@@ -205,13 +205,15 @@ class HMAC_SHA256:
         self.key = key
 
     def set_session_key(self, session_key: bytes):
-        self.logger.debug(f"Changing HMAC_SHA256 to use session_key")
+        """ """
+        self.logger.debug("Changing HMAC_SHA256 to use session_key")
         self.key = session_key
 
     def hash(self, data: bytes) -> bytes:
-        self.hasher = hmac.HMAC(self.key, hashes.SHA256())
-        self.hasher.update(data)
-        return self.hasher.finalize()
+        """ """
+        hasher = hmac.HMAC(self.key, hashes.SHA256())
+        hasher.update(data)
+        return hasher.finalize()
 
 
 class TuyaPacketer(ABC):
@@ -262,7 +264,8 @@ class TuyaPacketer31(TuyaPacketer):
 
         # Start with Tuya Header
         # Extract prefix, remote_seq_n, command, len, ret_code from recieved data
-        _, seqno, cmd, length, retcode = struct.unpack(TUYA_HEADER_RCV_FMT, data_in[:TUYA_HEADER_RCV_SIZE])
+        # prefix, seqno, cmd, len, ret
+        _, seqno, cmd, _, retcode = struct.unpack(TUYA_HEADER_RCV_FMT, data_in[:TUYA_HEADER_RCV_SIZE])
 
         # Check CRC/HASH
         data = data_in[TUYA_HEADER_SIZE: -TUYA_HEADER_END_31_SIZE]
@@ -325,7 +328,8 @@ class TuyaPacketer33(TuyaPacketer):
 
         # Start with Tuya Header
         # Extract prefix, remote_seq_n, command, len, ret_code from recieved data
-        _, seqno, cmd, length, retcode = struct.unpack(TUYA_HEADER_RCV_FMT, data_in[:TUYA_HEADER_RCV_SIZE])
+        # prefix, seqno, cmd, len, ret
+        _, seqno, cmd, _, retcode = struct.unpack(TUYA_HEADER_RCV_FMT, data_in[:TUYA_HEADER_RCV_SIZE])
 
         # Check CRC/HASH
         data = data_in[TUYA_HEADER_SIZE: -TUYA_HEADER_END_31_SIZE]
@@ -370,6 +374,9 @@ class TuyaPacketer34(TuyaPacketer):
     def __init__(self, logger, device_key: bytes):
         TuyaPacketer.__init__(self, logger, device_key)
         self.hmac_sha256 = HMAC_SHA256(logger, device_key)
+        self.local_key = None
+        self.remote_key = None
+        self.session_key = None
 
     def set_local_key(self, local_key: bytes):
         """Sets the local_key used in calculation of the session_key"""
@@ -381,8 +388,8 @@ class TuyaPacketer34(TuyaPacketer):
 
         try:
             self.local_key
-        except AttributeError:
-            raise Exception("Local_key was not set. Set it before remote_key, so that it can be used in session_key calculation")
+        except AttributeError as exc:
+            raise Exception("Local_key was not set. Set it before remote_key, so that it can be used in session_key calculation") from exc
 
         # Calculate session_key
         self.session_key = bytearray()
@@ -391,8 +398,6 @@ class TuyaPacketer34(TuyaPacketer):
         self.session_key = self.cipher_ecb_aes128.encrypt(self.session_key, use_base64=False, padding=False)
 
         # From now on the session is used for calculating the Tuya packet hash
-        self.logger.debug(f"session_key length: {len(self.session_key)}")
-        print(f"Session_key: {self.session_key.hex()}")
         self.cipher_ecb_aes128.set_session_key(self.session_key)
         self.hmac_sha256.set_session_key(self.session_key)
 
@@ -400,7 +405,6 @@ class TuyaPacketer34(TuyaPacketer):
     def pack_message(self, packet: TuyaPacket) -> bytes:
         """Pack a TuyaPacket into bytes."""
 
-        print(packet)
         data = packet.data
         if isinstance(data, str):
             data = data.encode("UTF-8")
@@ -408,10 +412,8 @@ class TuyaPacketer34(TuyaPacketer):
 
         # Create full message excluding hash and suffix
         buffer = struct.pack(TUYA_HEADER_FMT, TUYA_PREFIX, packet.seqno, packet.cmd, len(encrypted_data) + TUYA_HEADER_END_34_SIZE) + encrypted_data
-        self.logger.debug(f"packing TuyaPacket into buffer: '{buffer.hex()}'")
         # Calculate hash, add it together with suffix
         buffer += struct.pack(TUYA_HEADER_END_34_FMT, self.hmac_sha256.hash(buffer), TUYA_SUFFIX)
-        self.logger.debug(f"packing TuyaPacket into buffer with suffix: '{buffer.hex()}'")
 
         return buffer
 
@@ -420,7 +422,8 @@ class TuyaPacketer34(TuyaPacketer):
 
         # Start with Tuya Header
         # Extract prefix, remote_seq_n, command, len, ret_code from recieved data
-        _, seqno, cmd, length, retcode = struct.unpack(TUYA_HEADER_RCV_FMT, data_in[:TUYA_HEADER_RCV_SIZE])
+        # prefix, seqno, cmd, len, ret
+        _, seqno, cmd, _, retcode = struct.unpack(TUYA_HEADER_RCV_FMT, data_in[:TUYA_HEADER_RCV_SIZE])
 
         # Check CRC/HASH
         data = data_in[TUYA_HEADER_SIZE: -TUYA_HEADER_END_34_SIZE]
@@ -443,13 +446,17 @@ class TuyaPacketer34(TuyaPacketer):
         # Remove some sort of version header with some data
         if data.startswith(PROTOCOL_VERSION_BYTES_34):
             data = data[3 + 12:]
+        elif data == b'data format error':
+            raise Exception(f"Response (retcode: '{retcode}'): Data format error. TODO: Handle gracefuly")
+            # TODO: Handle gracefuly
         
         if not isinstance(data, str) and cmd not in [0x03, 0x04, 0x05]:
             data = data.decode()
-            self.logger.debug("Decrypted data: %s", data)
             if len(data) == 0:
                 self.logger.warning("TODO: Adding '{}' to packet with no data. Is this only quick fix?")
                 data = "{}"
+
+            self.logger.debug("Decrypted data: %s", data)
 
             return TuyaPacket(seqno, cmd, retcode, json.loads(data))
         else:
@@ -464,10 +471,11 @@ class MessageDispatcher:
     # other messages. This is a hack to allow waiting for heartbeats.
     HEARTBEAT_SEQNO = -100
 
-    def __init__(self, logger, tuya_packeter: TuyaPacketer, unhandled_packet_callback):
+    def __init__(self, logger, tuya_packeter: TuyaPacketer, parsed_packet_callback ,unhandled_packet_callback):
         """Initialize a new MessageBuffer."""
         self.logger = logger
         self.tuya_packeter = tuya_packeter
+        self.parsed_packet_callback = parsed_packet_callback
         self.unhandled_packet_callback = unhandled_packet_callback
 
         self.buffer = b""
@@ -511,7 +519,8 @@ class MessageDispatcher:
                 break
 
             # Parse header and check if enough data according to length in header
-            _, seqno, cmd, length, retcode = struct.unpack_from(TUYA_HEADER_RCV_FMT, self.buffer)
+            # prefix, seqno, cmd, len, ret
+            _, _, _, length, _ = struct.unpack_from(TUYA_HEADER_RCV_FMT, self.buffer)
 
             # TODO: Not enough data. Should break or raise? (Can missing data come in next TCP packet?)
             if len(self.buffer) - TUYA_HEADER_SIZE < length:
@@ -520,6 +529,7 @@ class MessageDispatcher:
             packet = self.tuya_packeter.unpack_message(self.buffer[: TUYA_HEADER_SIZE + length])
 
             self.buffer = self.buffer[TUYA_HEADER_SIZE + length :]
+            self.parsed_packet_callback(packet)
             self._dispatch(packet)
 
     def _dispatch(self, packet: TuyaPacket):
@@ -590,6 +600,9 @@ class TuyaProtocol(asyncio.Protocol):
         self.logger = logger
 
         # self.dev_type = "type_0a"
+        # Will get set with first incomming packet
+        # TODO: may not work with Tuya protocol v3.1 & v3.3!
+        self.remote_seqno = None
 
         if protocol_version == 3.1:
             self.packeter = TuyaPacketer31(logger, device_key)
@@ -600,7 +613,7 @@ class TuyaProtocol(asyncio.Protocol):
         else:
             raise Exception(f"Unknown Protocol version '{protocol_version}'")
         
-        self.dispatcher = MessageDispatcher(logger, self.packeter, unhandled_packet_callback)
+        self.dispatcher = MessageDispatcher(logger, self.packeter, self.parsed_packet_callback, unhandled_packet_callback)
 
         self.connection_made_callback = connection_made_callback
         self.connection_lost_callback = connection_lost_callback
@@ -616,6 +629,10 @@ class TuyaProtocol(asyncio.Protocol):
     def data_received(self, data: bytes):
         """Received data from device."""
         self.dispatcher.add_data(data)
+
+    def parsed_packet_callback(self, data):
+        """ Callback that keeps track of the remote_seqno so it knows what seqno to wait for when calling exchange()."""
+        self.remote_seqno = data.seqno
 
     def connection_lost(self, exc):
         """
@@ -639,15 +656,18 @@ class TuyaProtocol(asyncio.Protocol):
             self.transport = None
             transport.close()
 
-    async def exchange(self, packet: TuyaPacket) -> TuyaPacket:
+    async def exchange(self, packet: TuyaPacket, seqno: int = None) -> TuyaPacket:
         """Send and receive a message, returning response from device."""
         # Wait for special sequence number if heartbeat
-        seqno = MessageDispatcher.HEARTBEAT_SEQNO if packet.cmd == 0x09 else packet.seqno
+        seqno = MessageDispatcher.HEARTBEAT_SEQNO if packet.cmd == 0x09 else seqno
 
         packet_raw = self.packeter.pack_message(packet)
         self.transport.write(packet_raw)
 
-        packet = await self.dispatcher.wait_for(seqno)
+        if seqno is not None:
+            packet = await self.dispatcher.wait_for(seqno)
+        else:
+            packet = await self.dispatcher.wait_for(self.remote_seqno + 1)
         return packet
 
     async def send(self, packet: TuyaPacket):
@@ -665,7 +685,7 @@ class AbstractTuyaAgent(ABC):
     def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener):
         self.logger = ContextualLogger()
         self.logger.set_logger(_LOGGER, device_id)
-        self.logger.debug(f"TuyaAgent __init__()")
+        self.logger.debug("TuyaAgent __init__()")
 
         self.device_id = device_id
         self.device_key = device_key
@@ -677,7 +697,7 @@ class AbstractTuyaAgent(ABC):
         self.on_connected_future = on_connected_future
 
         self.datapoints_cache = {}
-        self.datapoints_to_update = {}
+        self.datapoints_to_request = {}
         self.seqno = 1000
 
         self.listener = weakref.ref(listener)
@@ -686,23 +706,23 @@ class AbstractTuyaAgent(ABC):
 
         self.protocol = None
 
-        f = open("testing_scripts/commands.json")
+        f = open("testing_scripts/commands.json", encoding='UTF-8')
         self.device_command_list = json.load(f)
         f.close()
 
-        f = open("testing_scripts/datapoints.json")
+        f = open("testing_scripts/datapoints.json", encoding='UTF-8')
         self.device_datapoints = json.load(f)
         f.close()
 
 
     def _unhandled_packet_callback(self, packet):
         if "dps" in packet:
-            self.dps_cache.update(packet["dps"])
+            self.datapoints_cache.update(packet["dps"])
 
         # Try to get listener reference and then call status_updated
         listener = self.listener()
         if listener is not None:
-            listener.status_updated(self.dps_cache)
+            listener.status_updated(self.datapoints_cache)
     
 
     def _start_heartbeat(self):
@@ -721,7 +741,6 @@ class AbstractTuyaAgent(ABC):
                     raise
                 except asyncio.TimeoutError:
                     self.logger.debug("Heartbeat failed due to timeout, disconnecting")
-                    raise
                     break
                 except Exception as ex:  # pylint: disable=broad-except
                     self.logger.exception("Heartbeat failed (%s), disconnecting", ex)
@@ -732,11 +751,11 @@ class AbstractTuyaAgent(ABC):
 
         self.heartbeater = asyncio.get_running_loop().create_task(heartbeat_loop())
         
-    async def exchange(self, command, dps=None):
+    async def exchange(self, command, dps=None) -> dict | bytes:
         """Send and receive a message, returning response from device."""
         self.logger.debug("Sending command %s (device type: %s)", command, self.dev_type,)
 
-        packet_out = self._generate_payload(command, dps)
+        packet_out = self._generate_payload(command)
         dev_type = self.dev_type
 
         packet_response = await self.protocol.exchange(packet_out)
@@ -757,12 +776,12 @@ class AbstractTuyaAgent(ABC):
         # Send status command and get response
         status = await self.exchange(STATUS)
 
-        # If there are any dps (datapoints) data -> update values in dps_cache
+        # If there are any dps (datapoints) data -> update values in datapoints_cache
         if status and "dps" in status:
-            self.dps_cache.update(status["dps"])
+            self.datapoints_cache.update(status["dps"])
 
-        # Return dps_cache
-        return self.dps_cache
+        # Return datapoints_cache
+        return self.datapoints_cache
 
     def _on_connected(self):
         """Callback after getting connected to the device."""
@@ -794,11 +813,31 @@ class AbstractTuyaAgent(ABC):
         await self.protocol.close()
 
     @abstractmethod
-    def _generate_payload(self) -> TuyaPacket:
+    async def update_dps(self, datapoints: list[int]=None) -> bool:
+        """ """
+
+    @abstractmethod
+    async def set_dp(self, value: str | int | bool, dp_index: int=None) -> dict:
+        """ """
+        
+    @abstractmethod
+    async def set_dps(self, data: dict[str: str | int | bool]=None) -> dict:
+        """ """
+
+    @abstractmethod
+    async def detect_available_dps(self) -> dict:
+        """ """
+
+    @abstractmethod
+    def add_dps_to_request(self, datapoints: int | list):
+        """ """
+        
+    @abstractmethod
+    def _generate_payload(self, command: str, data_in: str=None) -> TuyaPacket:
         """Generate TuyaPacket to be sent by Tuya protocol."""
 
     @abstractmethod
-    async def connect(self, address: str, device_key: bytes, protocol_version: float, port: int, timeout,):
+    async def connect(self, address: str, port: int, timeout,):
         """Used to connect to the device."""
 
     async def _connect(self, address: str, device_key: bytes, protocol_version: float, port: int, timeout,):
@@ -811,7 +850,7 @@ class AbstractTuyaAgent(ABC):
         loop = asyncio.get_running_loop()
 
         _, protocol = await loop.create_connection(
-            lambda: TuyaProtocol(logger, device_key, protocol_version, lambda: None, self._on_disconnected, self._unhandled_packet_callback),
+            lambda: TuyaProtocol(self.logger, device_key, protocol_version, lambda: None, self._on_disconnected, self._unhandled_packet_callback),
             address,
             port,)
 
@@ -853,7 +892,7 @@ class TuyaAgent31(AbstractTuyaAgent):
     def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener=None):
         AbstractTuyaAgent.__init__(self, device_id, device_key, on_connected_future, listener or EmptyListener())
 
-    async def update_dps(self, dps=None):
+    async def update_dps(self, command: str, data_in: str=None) -> bool:
         """
         Request device to update index.
 
@@ -861,10 +900,10 @@ class TuyaAgent31(AbstractTuyaAgent):
             dps([int]): list of dps to update, default=detected&whitelisted
         """
         # TODO: This is from rewriten code, I do not have v3.1 and v3.3 devices
-        self.logger.warning("Cannot use update_dps with Tuya Protocol v3.1")
+        self.logger.warning("Cannot use update_dps with Tuya Protocol v3.1. I do not have v3.1 device and cannot check if v3.1 has the 'UPDATEDPS' command.")
         return False
 
-    async def set_dp(self, value, dp_index):
+    async def set_dp(self, value: str | int | bool, dp_index: int=None) -> dict:
         """
         Set value (may be any type: bool, int or string) of any dps index.
 
@@ -872,11 +911,13 @@ class TuyaAgent31(AbstractTuyaAgent):
             dp_index(int):   dps index to set
             value: new value for the dps index
         """
+        self.logger.warning("Cannot check Tuya Protocol v3.1.")
         return await self.exchange(SET, {str(dp_index): value})
     
-    async def set_dps(self, dps):
+    async def set_dps(self, data: dict[str: str | int | bool]=None) -> dict:
         """Set values for a set of datapoints."""
-        return await self.exchange(SET, dps)
+        self.logger.warning("Cannot check Tuya Protocol v3.1.")
+        return await self.exchange(SET, data)
 
     async def detect_available_dps(self) -> dict:
         """Return which datapoints are supported by the device."""
@@ -884,12 +925,13 @@ class TuyaAgent31(AbstractTuyaAgent):
         # list of available dps experience shows that the dps available are usually
         # in the ranges [1-25] and [100-110] need to split the bruteforcing in
         # different steps due to request payload limitation (max. length = 255)
-        self.dps_cache = {}
+        self.logger.warning("Cannot check Tuya Protocol v3.1.")
+        self.datapoints_cache = {}
         ranges = [(2, 11), (11, 21), (21, 31), (100, 111)]
 
         for dps_range in ranges:
             # dps 1 must always be sent, otherwise it might fail in case no dps is found in the requested range
-            self.dps_to_request = {"1": None}
+            self.datapoints_to_request = {"1": None}
             self.add_dps_to_request(range(*dps_range))
             try:
                 data = await self.status()
@@ -897,22 +939,23 @@ class TuyaAgent31(AbstractTuyaAgent):
                 self.logger.exception("Failed to get status: %s", ex)
                 raise
             if "dps" in data:
-                self.dps_cache.update(data["dps"])
+                self.datapoints_cache.update(data["dps"])
 
             if self.dev_type == "type_0a":
-                return self.dps_cache
+                return self.datapoints_cache
 
-        self.logger.debug("Detected dps: %s", self.dps_cache)
-        return self.dps_cache
+        self.logger.debug("Detected datapoints: %s", self.datapoints_cache)
+        return self.datapoints_cache
         
-    def add_dps_to_request(self, dp_indicies):
+    def add_dps_to_request(self, datapoints: int | list):
         """Add a datapoint (DP) to be included in requests."""
-        if isinstance(dp_indicies, int):
-            self.dps_to_request[str(dp_indicies)] = None
+        self.logger.warning("Cannot check Tuya Protocol v3.1.")
+        if isinstance(datapoints, int):
+            self.datapoints_to_request[str(datapoints)] = None
         else:
-            self.dps_to_request.update({str(index): None for index in dp_indicies})
+            self.datapoints_to_request.update({str(index): None for index in datapoints})
 
-    def _generate_payload(self, command, data_in=None) -> TuyaPacket:
+    def _generate_payload(self, command: str, data_in: str=None) -> TuyaPacket:
         """
         Generate the payload to send.
 
@@ -922,6 +965,7 @@ class TuyaAgent31(AbstractTuyaAgent):
             data_in(dict, optional): The data to be send.
                 This is what will be passed via the 'dps' entry
         """
+        self.logger.warning("Cannot check Tuya Protocol v3.1.")
         cmd_data = self.PAYLOAD_DICT[self.dev_type][command]
         json_data = cmd_data["command"]
         command_hb = cmd_data["hexByte"]
@@ -941,7 +985,7 @@ class TuyaAgent31(AbstractTuyaAgent):
             else:
                 json_data["dps"] = data_in
         elif command_hb == 0x0D:
-            json_data["dps"] = self.dps_to_request
+            json_data["dps"] = self.datapoints_to_request
 
         data = json.dumps(json_data).replace(" ", "").encode("utf-8")
         self.logger.debug("Send data: %s", data)
@@ -959,7 +1003,7 @@ class TuyaAgent33(TuyaAgent31):
     """ """
 
     def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener=None):
-        AbstractTuyaAgent.__init__(self, device_id, device_key, on_connected_future, listener or EmptyListener())
+        TuyaAgent31.__init__(self, device_id, device_key, on_connected_future, listener or EmptyListener())
 
     async def update_dps(self, dps=None):
         """
@@ -968,15 +1012,16 @@ class TuyaAgent33(TuyaAgent31):
         Args:
             dps([int]): list of dps to update, default=detected&whitelisted
         """
+        self.logger.warning("Cannot check Tuya Protocol v3.3.")
         if dps is None:
-            if not self.dps_cache:
+            if not self.datapoints_cache:
                 await self.detect_available_dps()
-            if self.dps_cache:
-                dps = [int(dp) for dp in self.dps_cache]
-                # filter non whitelisted dps
+            if self.datapoints_cache:
+                dps = [int(dp) for dp in self.datapoints_cache]
+                # filter non whitelisted datapoints
                 dps = list(set(dps).intersection(set(UPDATE_DPS_WHITELIST)))
 
-        self.logger.debug("updatedps() entry (dps %s, dps_cache %s)", dps, self.dps_cache)
+        self.logger.debug("update_dps() entry (dps %s, datapoints_cache %s)", dps, self.datapoints_cache)
 
         packet = self._generate_payload(UPDATEDPS, dps)
         await self.protocol.send(packet)
@@ -994,8 +1039,8 @@ class TuyaAgent34(AbstractTuyaAgent):
     def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener=None):
         AbstractTuyaAgent.__init__(self, device_id, device_key, on_connected_future, listener or EmptyListener())
         self.local_seqno = 12101
-        # self.local_key = urandom(16)
-        self.local_key = b'925361b44cd92d9a'
+        self.remote_seqno = None
+        self.local_key = urandom(16)
         self.remote_key = None
 
         self.wait_for_remote_key_future = asyncio.get_running_loop().create_future()
@@ -1023,7 +1068,7 @@ class TuyaAgent34(AbstractTuyaAgent):
 
         await asyncio.sleep(2)
 
-        packet = TuyaPacket(self.local_seqno, self.device_command_list["commands_3.4"]["DP_QUERY"], 0, "{}")
+        packet = TuyaPacket(self.local_seqno, self.device_command_list["commands_3.4"]["DP_QUERY_NEW"], 0, "{}")
         self.local_seqno += 1
         await self.protocol.send(packet)
 
@@ -1050,23 +1095,76 @@ class TuyaAgent34(AbstractTuyaAgent):
 
         return super()._unhandled_packet_callback(packet)
 
+    async def heartbeat(self):
+        """Send a heartbeat message."""
+        return await self.exchange(self._generate_payload(HEARTBEAT))
+
+    async def status(self) -> dict:
+        """Return device status."""
+        raise Exception("TODO")
+
     def _on_connected(self):
         """Callback after getting connected to the device."""
         # Overwrite base _on_connected, all is handled in self.connect() because of the key generation
         # Do nothing, all is done in self.connect()
 
-        # if self.protocol == None:
-        #     raise Exception("protocol is none")
+    async def exchange(self, packet_out: TuyaPacket) -> dict | bytes:
+        """Send and receive a message, returning response from device."""
+        self.logger.debug(f"Sending packet {packet_out}")
 
-        # raise Exception("TODO")
+        packet_response = await self.protocol.exchange(packet_out)
 
-        # return super()._on_connected()
+        return packet_response.data
+        
+    async def update_dps(self, datapoints: list[int]=None) -> bool:
+        """ """        
+        packet = self._generate_payload(DP_QUERY_NEW)
 
-    def _generate_payload(self, command, data_in=None) -> TuyaPacket:
+        if datapoints is not None:
+            self.logger.warning("TODO: DP_QUERY_NEW should not have any data in. Can it have?")
+
+        data = await self.exchange(packet)
+        dps_status = data["dps"]
+        self.datapoints_cache.update(dps_status)
+
+        self.logger.debug(f"Updated datapoints_cache: {self.datapoints_cache}")
+
+        return True
+
+    async def set_dp(self, value: str | int | bool, dp_index: int=None) -> dict:
+        """ """
+        
+    async def set_dps(self, data: dict[str: str | int | bool]=None) -> dict:
+        """ """
+
+    from collections.abc import KeysView
+    async def detect_available_dps(self) -> KeysView:
+        """ """
+        if await self.update_dps() is True:
+            return self.datapoints_cache.keys()
+        else:
+            # TODO: Handle gracefuly
+            raise Exception("Unable to detect available dps. TODO: Handle gracefuly")
+
+    def add_dps_to_request(self, datapoints: int | list):
+        """ """
+        
+
+    def _generate_payload(self, command: str, data_in: str=None) -> TuyaPacket:
         """ """
         if command == HEARTBEAT:
-            packet = TuyaPacket(self.local_seqno, self.device_command_list["commands_3.4"]["HEART_BEAT"], 0, b"")
-            self.local_seqno += 1
-            return packet
+            return self._create_tuya_packet_helper("HEART_BEAT")
+
+        elif command == DP_QUERY_NEW:
+            if data_in is not None:
+                self.logger.warning("DP_QUERY_NEW should not have any data in. TODO: can it have?")
+            return self._create_tuya_packet_helper("DP_QUERY_NEW", "{}")
+
         else:
             raise Exception("TODO: _generate_payload")
+
+    def _create_tuya_packet_helper(self, command: str, data: bytes = b"") -> TuyaPacket:
+        """ Creates Tuya packet and increments the local_seqno. """
+        packet = TuyaPacket(self.local_seqno, self.device_command_list["commands_3.4"][command], 0, data)
+        self.local_seqno += 1
+        return packet

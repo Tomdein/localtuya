@@ -41,7 +41,7 @@
         "STATUS": 8,
         "HEART_BEAT": 9,
         "CONTROL": 13,
-        "DP_QUERY": 16,
+        "DP_QUERY_NEW": 16,
         "SUBDEV_ONLINE_STAT_QUERY": 64
     }
 }
