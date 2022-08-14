@@ -122,7 +122,7 @@ class TuyaLoggingAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         """Process log point and return output."""
         dev_id = self.extra["device_id"].decode()
-        return f"[device_id: '{dev_id[0:3]}...{dev_id[-3:]}'] {msg}", kwargs
+        return f"|device_id: '{dev_id[0:3]}...{dev_id[-3:]}'| {msg}", kwargs
 
 
 class ContextualLogger:
@@ -156,13 +156,69 @@ class ContextualLogger:
         """Exception level log."""
         return self._logger.exception(msg, *args)
 
+        
+class TuyaExtendedLoggingAdapter(logging.LoggerAdapter):
+    """Adapter that adds device_id and class to all log points."""
+
+    def process(self, msg, kwargs):
+        """Process log point and return output."""
+        dev_id = self.extra["device_id"].decode()
+        class_name = self.extra["class_name"]
+        return f"|device_id: '{dev_id[0:3]}...{dev_id[-3:]}'||{class_name}| {msg}", kwargs
+
+
+class ExtendedContextualLogger:
+    """Contextual logger adding device id to log points."""
+
+    def __init__(self):
+        """Initialize a new ContextualLogger."""
+        self._logger = None
+        self._log = None
+        self._device_id = None
+        self._class_name = None
+
+    def set_logger(self, logger, device_id, class_name):
+        """Set base logger to use."""
+        self._log = logger
+        self._device_id = device_id
+        self._class_name = class_name
+        self._logger = TuyaExtendedLoggingAdapter(logger, {"device_id": device_id, "class_name": class_name})
+
+    def copy_logger_for_class(self, class_name):
+        """Creates new ExtendedContextualLogger that logs in different class."""
+        logger = ExtendedContextualLogger()
+        logger.set_logger(self._log, self._device_id, class_name)
+        return logger
+
+    def debug(self, msg, *args):
+        """Debug level log."""
+        return self._logger.log(logging.DEBUG, msg, *args)
+
+    def info(self, msg, *args):
+        """Info level log."""
+        return self._logger.log(logging.INFO, msg, *args)
+
+    def warning(self, msg, *args):
+        """Warning method log."""
+        return self._logger.log(logging.WARNING, msg, *args)
+
+    def error(self, msg, *args):
+        """Error level log."""
+        return self._logger.log(logging.ERROR, msg, *args)
+
+    def exception(self, msg, *args):
+        """Exception level log."""
+        return self._logger.exception(msg, *args)
+
+
+
 
 class AESCipher:
     """Cipher module for Tuya communication."""
 
-    def __init__(self, logger: ContextualLogger, key: bytes):
+    def __init__(self, logger: ExtendedContextualLogger, key: bytes):
         """Initialize a new AESCipher."""
-        self.logger = logger
+        self.logger = logger.copy_logger_for_class("AESCipher")
         self.block_size = 16
 
         self.logger.debug("Creating ECB_AES128 cipher using device_key")
@@ -200,8 +256,8 @@ class AESCipher:
 class HMAC_SHA256:
     """ """
 
-    def __init__(self, logger: ContextualLogger, key: bytes):
-        self.logger = logger
+    def __init__(self, logger: ExtendedContextualLogger, key: bytes):
+        self.logger = logger.copy_logger_for_class("HMAC_SHA256")
         self.key = key
 
     def set_session_key(self, session_key: bytes):
@@ -220,7 +276,7 @@ class TuyaPacketer(ABC):
     """ """
 
     def __init__(self, logger, device_key: bytes):
-        self.logger = logger
+        self.logger = logger.copy_logger_for_class("TuyaPacketer")
         self.device_key = device_key
         self.cipher_ecb_aes128 = AESCipher(logger, device_key)
 
@@ -471,9 +527,9 @@ class MessageDispatcher:
     # other messages. This is a hack to allow waiting for heartbeats.
     HEARTBEAT_SEQNO = -100
 
-    def __init__(self, logger, tuya_packeter: TuyaPacketer, parsed_packet_callback ,unhandled_packet_callback):
+    def __init__(self, logger: ExtendedContextualLogger, tuya_packeter: TuyaPacketer, parsed_packet_callback ,unhandled_packet_callback):
         """Initialize a new MessageBuffer."""
-        self.logger = logger
+        self.logger = logger.copy_logger_for_class("MessageDispatcher")
         self.tuya_packeter = tuya_packeter
         self.parsed_packet_callback = parsed_packet_callback
         self.unhandled_packet_callback = unhandled_packet_callback
@@ -586,7 +642,7 @@ class EmptyListener(TuyaListener):
 class TuyaProtocol(asyncio.Protocol):
     """Implementation of the Tuya protocol."""
 
-    def __init__(self, logger: ContextualLogger, device_key: bytes, protocol_version: float, connection_made_callback, connection_lost_callback, unhandled_packet_callback):
+    def __init__(self, logger: ExtendedContextualLogger, device_key: bytes, protocol_version: float, connection_made_callback, connection_lost_callback, unhandled_packet_callback):
         """
         Initialize a new TuyaInterface.
 
@@ -597,7 +653,7 @@ class TuyaProtocol(asyncio.Protocol):
         """
         super().__init__()
 
-        self.logger = logger
+        self.logger = logger.copy_logger_for_class("TuyaProtocol")
 
         # self.dev_type = "type_0a"
         # Will get set with first incomming packet
@@ -683,8 +739,8 @@ class AbstractTuyaAgent(ABC):
 
     # TODO: Will EmptyListener get immediately destroyed?
     def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener):
-        self.logger = ContextualLogger()
-        self.logger.set_logger(_LOGGER, device_id)
+        self.logger = ExtendedContextualLogger()
+        self.logger.set_logger(_LOGGER, device_id, "TuyaAgent")
         self.logger.debug("TuyaAgent __init__()")
 
         self.device_id = device_id
