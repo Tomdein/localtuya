@@ -911,9 +911,17 @@ class AbstractTuyaAgent(ABC):
 
         # self._on_connected()
 
-    def close(self):
-        """ """
-        raise Exception("TODO: close")
+    async def close(self):
+        """Close connection and abort all outstanding listeners."""
+        self.logger.debug("Closing connection")
+        if self.heartbeater is not None:
+            self.heartbeater.cancel()
+            try:
+                await self.heartbeater
+            except asyncio.CancelledError:
+                pass
+            self.heartbeater = None
+        await self.protocol.close()
 
 class TuyaAgent31(AbstractTuyaAgent):
     """ """
@@ -1150,7 +1158,9 @@ class TuyaAgent34(AbstractTuyaAgent):
 
     async def status(self) -> dict:
         """Return device status."""
-        raise Exception("TODO")
+        # TODO: Is this alright?
+        await self.update_dps()
+        return self.datapoints_cache
 
     def _on_connected(self):
         """Callback after getting connected to the device."""
@@ -1199,7 +1209,8 @@ class TuyaAgent34(AbstractTuyaAgent):
 
     def add_dps_to_request(self, datapoints: int | list):
         """ """
-        raise Exception("TODO")
+        # TODO: Is this alright?
+        self.logger.warning("TODO: Can it be empty for protocol v3.4? detect_available_dps queries all.")
 
     def list_available_datapoints(self, device_name: str):
         """Uses info from datapoints.json (generated from Tuya cloud API)."""
