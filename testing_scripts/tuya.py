@@ -92,6 +92,7 @@ PROTOCOL_33_HEADER = PROTOCOL_VERSION_BYTES_33 + 12 * b"\x00"
 SET = "set"
 STATUS = "status"
 HEARTBEAT = "heartbeat"
+CONTROL_NEW = "control_new"
 DP_QUERY_NEW = "dp_query_new"
 UPDATEDPS = "updatedps"  # Request refresh of DPS
 
@@ -1187,11 +1188,13 @@ class TuyaAgent34(AbstractTuyaAgent):
 
         return True
 
-    async def set_dp(self, value: str | int | bool, dp_index: int=None) -> dict:
+    async def set_dp(self, value: str | int | bool, dp_index: int) -> dict:
         """ """
+        return await self.exchange(self._generate_payload(CONTROL_NEW, {str(dp_index): value}))
         
     async def set_dps(self, data: dict[str: str | int | bool]=None) -> dict:
-        """ """
+        """ data is a dict of 'dp_id : value'."""
+        return await self.exchange(self._generate_payload(CONTROL_NEW, data))
 
     from collections.abc import KeysView
     async def detect_available_dps(self) -> KeysView:
@@ -1204,7 +1207,18 @@ class TuyaAgent34(AbstractTuyaAgent):
 
     def add_dps_to_request(self, datapoints: int | list):
         """ """
-        
+        raise Exception("TODO")
+
+    def list_available_datapoints(self, device_name: str):
+        """Uses info from datapoints.json (generated from Tuya cloud API)."""
+        print(f"Showing datapoint for '{device_name}':")
+        for datapoints in self.get_datapoints(device_name):
+            print(f"    {datapoints}")
+
+    def get_available_datapoints(self, device_name: str) -> list[str]:
+        """Uses info from datapoints.json (generated from Tuya cloud API)."""
+        datapoints = [dp for dp in self.device_datapoints[device_name]["functions"]]
+        return datapoints
 
     def _generate_payload(self, command: str, data_in: str=None) -> TuyaPacket:
         """ """
@@ -1215,6 +1229,12 @@ class TuyaAgent34(AbstractTuyaAgent):
             if data_in is not None:
                 self.logger.warning("DP_QUERY_NEW should not have any data in. TODO: can it have?")
             return self._create_tuya_packet_helper("DP_QUERY_NEW", "{}")
+
+        elif command == CONTROL_NEW:
+            data = {"data": {"dps": data_in}, "protocol": 5, "t": str(int(time.time() * 1000))}
+            msg = b'3.4\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+            msg += json.dumps(data).replace(" ", "").encode("utf-8")
+            return self._create_tuya_packet_helper("CONTROL_NEW", msg)
 
         else:
             raise Exception("TODO: _generate_payload")

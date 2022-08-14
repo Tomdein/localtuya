@@ -17,12 +17,18 @@ async def main():
 
     await asyncio.wait({task_connect})
 
-    await asyncio.sleep(10)
+    device.list_available_datapoints("aubess_smart_switch_1_gang")
 
-    await device.update_dps()
+    await asyncio.sleep(5)
 
-    await asyncio.sleep(20)
+    await device.set_dp(True, 1)
 
-    # await asyncio.wait_for(on_connected_future, timeout=10)
+    await asyncio.sleep(5)
+
+    await device.set_dp(False, 1)
+
+    await asyncio.sleep(5)
+
+    await device.set_dp(3, 9)
 
 asyncio.run(main(), debug=True)

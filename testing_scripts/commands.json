@@ -40,7 +40,7 @@
         "SEND_REMOTE_KEY": 5,
         "STATUS": 8,
         "HEART_BEAT": 9,
-        "CONTROL": 13,
+        "CONTROL_NEW": 13,
         "DP_QUERY_NEW": 16,
         "SUBDEV_ONLINE_STAT_QUERY": 64
     }
