@@ -22,7 +22,7 @@ from homeassistant.helpers.dispatcher import (
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from . import pytuya
+from ...testing_scripts import tuya as pytuya
 from .const import (
     ATTR_UPDATED_AT,
     CONF_LOCAL_KEY,
@@ -119,12 +119,14 @@ def async_config_entry_by_device_id(hass, device_id):
     return None
 
 
-class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
+class TuyaDevice(pytuya.TuyaListener):
     """Cache wrapper for pytuya.TuyaInterface."""
 
     def __init__(self, hass, config_entry, dev_id):
         """Initialize the cache."""
         super().__init__()
+        self.logger = pytuya.ContextualLogger()
+        self.logger.set_logger(_LOGGER, self._dev_config_entry[CONF_DEVICE_ID])
         self._hass = hass
         self._config_entry = config_entry
         self._dev_config_entry = config_entry.data[CONF_DEVICES][dev_id].copy()
@@ -136,7 +138,6 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
         self._disconnect_task = None
         self._unsub_interval = None
         self._local_key = self._dev_config_entry[CONF_LOCAL_KEY]
-        self.set_logger(_LOGGER, self._dev_config_entry[CONF_DEVICE_ID])
 
         # This has to be done in case the device type is type_0d
         for entity in self._dev_config_entry[CONF_ENTITIES]:
@@ -154,7 +155,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
 
     async def _make_connection(self):
         """Subscribe localtuya entity events."""
-        self.debug("Connecting to %s", self._dev_config_entry[CONF_HOST])
+        self.logger.debug("Connecting to %s", self._dev_config_entry[CONF_HOST])
 
         try:
             self._interface = await pytuya.connect(
@@ -166,7 +167,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
             )
             self._interface.add_dps_to_request(self.dps_to_request)
 
-            self.debug("Retrieving initial state")
+            self.logger.debug("Retrieving initial state")
             status = await self._interface.status()
             if status is None:
                 raise Exception("Failed to retrieve status")
@@ -174,7 +175,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
             self.status_updated(status)
 
             def _new_entity_handler(entity_id):
-                self.debug(
+                self.logger.debug(
                     "New entity %s was added to %s",
                     entity_id,
                     self._dev_config_entry[CONF_HOST],
@@ -196,7 +197,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
                     timedelta(seconds=self._dev_config_entry[CONF_SCAN_INTERVAL]),
                 )
         except UnicodeDecodeError as e:  # pylint: disable=broad-except
-            self.exception(
+            self.logger.exception(
                 f"Connect to {self._dev_config_entry[CONF_HOST]} failed: %s", type(e)
             )
             if self._interface is not None:
@@ -204,7 +205,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
                 self._interface = None
 
         except Exception as e:  # pylint: disable=broad-except
-            self.exception(f"Connect to {self._dev_config_entry[CONF_HOST]} failed")
+            self.logger.exception(f"Connect to {self._dev_config_entry[CONF_HOST]} failed")
             if "json.decode" in str(type(e)):
                 await self.update_local_key()
 
@@ -227,7 +228,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
                 self._config_entry,
                 data=new_data,
             )
-            self.info("local_key updated for device %s.", dev_id)
+            self.logger.info("local_key updated for device %s.", dev_id)
 
     async def _async_refresh(self, _now):
         if self._interface is not None:
@@ -243,7 +244,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
             await self._interface.close()
         if self._disconnect_task is not None:
             self._disconnect_task()
-        self.debug(
+        self.logger.debug(
             "Closed connection with device %s.",
             self._dev_config_entry[CONF_FRIENDLY_NAME],
         )
@@ -254,9 +255,9 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
             try:
                 await self._interface.set_dp(state, dp_index)
             except Exception:  # pylint: disable=broad-except
-                self.exception("Failed to set DP %d to %d", dp_index, state)
+                self.logger.exception("Failed to set DP %d to %d", dp_index, state)
         else:
-            self.error(
+            self.logger.error(
                 "Not connected to device %s", self._dev_config_entry[CONF_FRIENDLY_NAME]
             )
 
@@ -266,9 +267,9 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
             try:
                 await self._interface.set_dps(states)
             except Exception:  # pylint: disable=broad-except
-                self.exception("Failed to set DPs %r", states)
+                self.logger.exception("Failed to set DPs %r", states)
         else:
-            self.error(
+            self.logger.error(
                 "Not connected to device %s", self._dev_config_entry[CONF_FRIENDLY_NAME]
             )
 
@@ -291,7 +292,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
             self._unsub_interval()
             self._unsub_interval = None
         self._interface = None
-        self.debug("Disconnected - waiting for discovery broadcast")
+        self.logger.debug("Disconnected - waiting for discovery broadcast")
 
 
 class LocalTuyaEntity(RestoreEntity, pytuya.ContextualLogger):
@@ -300,18 +301,19 @@ class LocalTuyaEntity(RestoreEntity, pytuya.ContextualLogger):
     def __init__(self, device, config_entry, dp_id, logger, **kwargs):
         """Initialize the Tuya entity."""
         super().__init__()
+        self.logger = pytuya.ContextualLogger()
+        self.logger.set_logger(logger, self._dev_config_entry[CONF_DEVICE_ID])
         self._device = device
         self._dev_config_entry = config_entry
         self._config = get_entity_config(config_entry, dp_id)
         self._dp_id = dp_id
         self._status = {}
-        self.set_logger(logger, self._dev_config_entry[CONF_DEVICE_ID])
 
     async def async_added_to_hass(self):
         """Subscribe localtuya events."""
         await super().async_added_to_hass()
 
-        self.debug("Adding %s with configuration: %s", self.entity_id, self._config)
+        self.logger.debug("Adding %s with configuration: %s", self.entity_id, self._config)
 
         state = await self.async_get_last_state()
         if state:
@@ -380,7 +382,7 @@ class LocalTuyaEntity(RestoreEntity, pytuya.ContextualLogger):
         """Return cached value for DPS index."""
         value = self._status.get(str(dp_index))
         if value is None:
-            self.warning(
+            self.logger.warning(
                 "Entity %s is requesting unknown DPS index %s",
                 self.entity_id,
                 dp_index,
@@ -396,7 +398,7 @@ class LocalTuyaEntity(RestoreEntity, pytuya.ContextualLogger):
         """
         dp_index = self._config.get(conf_item)
         if dp_index is None:
-            self.warning(
+            self.logger.warning(
                 "Entity %s is requesting unset index for option %s",
                 self.entity_id,
                 conf_item,

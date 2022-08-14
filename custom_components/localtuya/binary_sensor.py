@@ -59,7 +59,7 @@ class LocaltuyaBinarySensor(LocalTuyaEntity, BinarySensorEntity):
         elif state == self._config[CONF_STATE_OFF].lower():
             self._is_on = False
         else:
-            self.warning(
+            self.logger.warning(
                 "State for entity %s did not match state patterns", self.entity_id
             )
 
