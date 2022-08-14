@@ -1,3 +1,10 @@
+# My custom tools for Tuya v3.4
+For development around Tuya protocol v3.4 you can use wireshark dissector to monitor the messages: <https://github.com/Tomdein/wireshark-dissector-tuya> 
+
+**For the description of the Tuya protocol v3.4 take a look into the repo with wireshark dissector.**
+
+---
+
 ![logo](https://github.com/rospogrigio/localtuya-homeassistant/blob/master/img/logo-small.png)
 
 A Home Assistant custom Integration for local handling of Tuya-based devices.
