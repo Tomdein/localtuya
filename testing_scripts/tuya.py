@@ -739,7 +739,7 @@ class AbstractTuyaAgent(ABC):
     """ """
 
     # TODO: Will EmptyListener get immediately destroyed?
-    def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener):
+    def __init__(self, device_id: bytes, device_key: bytes, listener: TuyaListener):
         self.logger = ExtendedContextualLogger()
         self.logger.set_logger(_LOGGER, device_id, "TuyaAgent")
         self.logger.debug("TuyaAgent __init__()")
@@ -748,10 +748,6 @@ class AbstractTuyaAgent(ABC):
         self.device_key = device_key
         # self.device_key = device_key.encode("latin1") # TODO: check if needs encoding
         self.dev_type = "type_0a"
-
-        
-        # Future. Async connect (to device) is waiting for this future to return
-        self.on_connected_future = on_connected_future
 
         self.datapoints_cache = {}
         self.datapoints_to_request = {}
@@ -946,8 +942,8 @@ class TuyaAgent31(AbstractTuyaAgent):
         },
     }
 
-    def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener=None):
-        AbstractTuyaAgent.__init__(self, device_id, device_key, on_connected_future, listener or EmptyListener())
+    def __init__(self, device_id: bytes, device_key: bytes, listener: TuyaListener=None):
+        AbstractTuyaAgent.__init__(self, device_id, device_key, listener or EmptyListener())
 
     async def update_dps(self, command: str, data_in: str=None) -> bool:
         """
@@ -1053,14 +1049,13 @@ class TuyaAgent31(AbstractTuyaAgent):
 
     async def connect(self, address: str, port: int=6668, timeout=5,):
         await super()._connect(address, self.device_key, 3.1, port, timeout)
-        self.on_connected_future.set_result(True)
 
 
 class TuyaAgent33(TuyaAgent31):
     """ """
 
-    def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener=None):
-        TuyaAgent31.__init__(self, device_id, device_key, on_connected_future, listener or EmptyListener())
+    def __init__(self, device_id: bytes, device_key: bytes, listener: TuyaListener=None):
+        TuyaAgent31.__init__(self, device_id, device_key, listener or EmptyListener())
 
     async def update_dps(self, dps=None):
         """
@@ -1087,14 +1082,13 @@ class TuyaAgent33(TuyaAgent31):
 
     async def connect(self, address: str, port: int=6668, timeout=5,):
         await super()._connect(address, self.device_key, 3.3, port, timeout)
-        self.on_connected_future.set_result(True)
 
 
 class TuyaAgent34(AbstractTuyaAgent):
     """ """
 
-    def __init__(self, device_id: bytes, device_key: bytes, on_connected_future: asyncio.Future, listener: TuyaListener=None):
-        AbstractTuyaAgent.__init__(self, device_id, device_key, on_connected_future, listener or EmptyListener())
+    def __init__(self, device_id: bytes, device_key: bytes, listener: TuyaListener=None):
+        AbstractTuyaAgent.__init__(self, device_id, device_key, listener or EmptyListener())
         self.local_seqno = 12101
         self.remote_seqno = None
         self.local_key = urandom(16)
@@ -1133,8 +1127,6 @@ class TuyaAgent34(AbstractTuyaAgent):
 
         # Gained access to the device after handshake -> can call AbstractTuyaAgent._on_connected() -> starts sending heartbeat
         AbstractTuyaAgent._on_connected(self)
-
-        self.on_connected_future.set_result(True)
 
     def _unhandled_packet_callback(self, packet):
         # Keep track of the remote_seqno
