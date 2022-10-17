@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import base64
 import binascii
@@ -10,6 +11,7 @@ from abc import ABC, abstractmethod
 from collections import namedtuple
 from hashlib import md5
 from os import urandom
+import os
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -744,6 +746,12 @@ class AbstractTuyaAgent(ABC):
         self.logger.set_logger(_LOGGER, device_id, "TuyaAgent")
         self.logger.debug("TuyaAgent __init__()")
 
+        if isinstance(device_id, str):
+            device_id = device_id.encode()
+
+        if isinstance(device_key, str):
+            device_key = device_key.encode()
+        
         self.device_id = device_id
         self.device_key = device_key
         # self.device_key = device_key.encode("latin1") # TODO: check if needs encoding
@@ -759,11 +767,15 @@ class AbstractTuyaAgent(ABC):
 
         self.protocol = None
 
-        f = open("testing_scripts/commands.json", encoding='UTF-8')
+        # Load available commands from commands.json file
+        path = os.path.join(os.path.dirname(__file__), "commands.json")
+        f = open(path, encoding='UTF-8')
         self.device_command_list = json.load(f)
         f.close()
 
-        f = open("testing_scripts/datapoints.json", encoding='UTF-8')
+        # Load available datapoints from commands.json file
+        path = os.path.join(os.path.dirname(__file__), "datapoints.json")
+        f = open(path, encoding='UTF-8')
         self.device_datapoints = json.load(f)
         f.close()
 
@@ -1198,11 +1210,10 @@ class TuyaAgent34(AbstractTuyaAgent):
         """ data is a dict of 'dp_id : value'."""
         return await self.exchange(self._generate_payload(CONTROL_NEW, data))
 
-    from collections.abc import KeysView
-    async def detect_available_dps(self) -> KeysView:
+    async def detect_available_dps(self) -> dict:
         """ """
         if await self.update_dps() is True:
-            return self.datapoints_cache.keys()
+            return self.datapoints_cache
         else:
             # TODO: Handle gracefuly
             raise Exception("Unable to detect available dps. TODO: Handle gracefuly")

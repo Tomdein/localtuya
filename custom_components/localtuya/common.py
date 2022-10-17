@@ -125,8 +125,6 @@ class TuyaDevice(pytuya.TuyaListener):
     def __init__(self, hass, config_entry, dev_id):
         """Initialize the cache."""
         super().__init__()
-        self.logger = pytuya.ContextualLogger()
-        self.logger.set_logger(_LOGGER, self._dev_config_entry[CONF_DEVICE_ID])
         self._hass = hass
         self._config_entry = config_entry
         self._dev_config_entry = config_entry.data[CONF_DEVICES][dev_id].copy()
@@ -138,6 +136,8 @@ class TuyaDevice(pytuya.TuyaListener):
         self._disconnect_task = None
         self._unsub_interval = None
         self._local_key = self._dev_config_entry[CONF_LOCAL_KEY]
+        self.logger = pytuya.ContextualLogger()
+        self.logger.set_logger(_LOGGER, self._dev_config_entry[CONF_DEVICE_ID].encode())
 
         # This has to be done in case the device type is type_0d
         for entity in self._dev_config_entry[CONF_ENTITIES]:
@@ -301,13 +301,13 @@ class LocalTuyaEntity(RestoreEntity, pytuya.ContextualLogger):
     def __init__(self, device, config_entry, dp_id, logger, **kwargs):
         """Initialize the Tuya entity."""
         super().__init__()
-        self.logger = pytuya.ContextualLogger()
-        self.logger.set_logger(logger, self._dev_config_entry[CONF_DEVICE_ID])
         self._device = device
         self._dev_config_entry = config_entry
         self._config = get_entity_config(config_entry, dp_id)
         self._dp_id = dp_id
         self._status = {}
+        self.logger = pytuya.ContextualLogger()
+        self.logger.set_logger(logger, self._dev_config_entry[CONF_DEVICE_ID].encode())
 
     async def async_added_to_hass(self):
         """Subscribe localtuya events."""

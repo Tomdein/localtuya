@@ -147,7 +147,7 @@ def options_schema(entities):
     )
 
 
-def schema_defaults(schema, dps_list=None, **defaults):
+def schema_defaults(schema: vol.Schema, dps_list=None, **defaults):
     """Create a new schema with default values filled in."""
     copy = schema.extend({})
     for field, field_type in copy.schema.items():
