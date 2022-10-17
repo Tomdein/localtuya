@@ -27,6 +27,7 @@ from homeassistant.core import callback
 
 from .cloud_api import TuyaCloudApi
 from .common import pytuya
+import asyncio
 from .const import (
     ATTR_UPDATED_AT,
     CONF_ACTION,
@@ -232,12 +233,10 @@ async def validate_input(hass: core.HomeAssistant, data):
 
     interface = None
     try:
-        interface = await pytuya.connect(
-            data[CONF_HOST],
-            data[CONF_DEVICE_ID],
-            data[CONF_LOCAL_KEY],
-            float(data[CONF_PROTOCOL_VERSION]),
-        )
+        # TODO: Support other versions
+        interface = pytuya.TuyaAgent34(data[CONF_DEVICE_ID], data[CONF_LOCAL_KEY])
+        connect_task = asyncio.create_task(interface.connect(data[CONF_HOST]))
+        await asyncio.wait({connect_task})
 
         detected_dps = await interface.detect_available_dps()
     except (ConnectionRefusedError, ConnectionResetError) as ex:

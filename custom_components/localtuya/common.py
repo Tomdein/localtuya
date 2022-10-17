@@ -157,14 +157,12 @@ class TuyaDevice(pytuya.TuyaListener):
         """Subscribe localtuya entity events."""
         self.logger.debug("Connecting to %s", self._dev_config_entry[CONF_HOST])
 
-        try:
-            self._interface = await pytuya.connect(
-                self._dev_config_entry[CONF_HOST],
-                self._dev_config_entry[CONF_DEVICE_ID],
-                self._local_key,
-                float(self._dev_config_entry[CONF_PROTOCOL_VERSION]),
-                self,
-            )
+        try:        
+            # TODO: Support other versions
+            self._interface = pytuya.TuyaAgent34(self._dev_config_entry[CONF_DEVICE_ID], self._local_key, self)
+            connect_task = asyncio.create_task(self._interface.connect(self._dev_config_entry[CONF_HOST]))
+            await asyncio.wait({connect_task})
+
             self._interface.add_dps_to_request(self.dps_to_request)
 
             self.logger.debug("Retrieving initial state")
