@@ -1,0 +1,89 @@
+{
+    "aubess_smart_switch_1_gang": {
+        "functions": [
+            {
+                "code": "switch_1",
+                "dp_id": 1,
+                "type": "Boolean",
+                "values": "{}"
+            },
+            {
+                "code": "countdown_1",
+                "dp_id": 9,
+                "type": "Integer",
+                "values": "{\"unit\":\"s\",\"min\":0,\"max\":86400,\"scale\":0,\"step\":1}"
+            },
+            {
+                "code": "relay_status",
+                "dp_id": 38,
+                "type": "Enum",
+                "values": "{\"range\":[\"0\":\"OFF\",\"1\":\"ON\",\"2\":\"Remember last status\"]}"
+            },
+            {
+                "code": "random_time",
+                "dp_id": 42,
+                "type": "String",
+                "values": "{\"maxlen\":255}"
+            },
+            {
+                "code": "cycle_time",
+                "dp_id": 43,
+                "type": "String",
+                "values": "{\"maxlen\":255}"
+            },
+            {
+                "code": "switch_inching",
+                "dp_id": 44,
+                "type": "String",
+                "values": "{\"maxlen\":255}"
+            }
+        ]
+    },
+    "outdoor_smart_plug": {
+        "reference": "https://github.com/rospogrigio/localtuya/issues/15#issuecomment-1020518664",
+        "functions": [
+            {
+                "code": "countdown_1",
+                "dp_id": 9,
+                "type": "Integer",
+                "values": "{\"unit\":\"s\",\"min\":0,\"max\":86400,\"scale\":0,\"step\":1}"
+            },
+            {
+                "code": "add_ele",
+                "dp_id": 17,
+                "type": "Integer",
+                "values": "{\"unit\":\"kwh\",\"min\":0,\"max\":50000,\"scale\":3,\"step\":100}"
+            },
+            {
+                "code": "cur_current",
+                "dp_id": 18,
+                "type": "Integer",
+                "values": "{\"unit\":\"mA\",\"min\":0,\"max\":30000,\"scale\":0,\"step\":1}"
+            },
+            {
+                "code": "cur_power",
+                "dp_id": 19,
+                "type": "Integer",
+                "values": "{\"unit\":\"W\",\"min\":0,\"max\":50000,\"scale\":1,\"step\":1}"
+            },
+            {
+                "code": "cur_voltage",
+                "dp_id": 20,
+                "type": "Integer",
+                "values": "{\"unit\":\"V\",\"min\":0,\"max\":5000,\"scale\":1,\"step\":1}"
+            },
+            {
+                "code": "cycle_time",
+                "dp_id": 41,
+                "type": "String",
+                "values": "{}"
+            },
+            {
+                "code": "random_time",
+                "dp_id": 42,
+                "type": "String",
+                "values": "{}"
+            }
+        ]
+    }
+}

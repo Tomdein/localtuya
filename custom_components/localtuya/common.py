@@ -22,7 +22,7 @@ from homeassistant.helpers.dispatcher import (
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from ...testing_scripts import tuya as pytuya
+from .pytuya import tuya as pytuya
 from .const import (
     ATTR_UPDATED_AT,
     CONF_LOCAL_KEY,
