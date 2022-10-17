@@ -51,6 +51,8 @@ from hashlib import md5
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from testing_scripts.tuya import TUYA_HEADER_RCV_SIZE, TUYA_HEADER_SIZE
+
 version_tuple = (9, 0, 0)
 version = version_string = __version__ = "%d.%d.%d" % version_tuple
 __author__ = "postlund"
@@ -172,6 +174,7 @@ def unpack_message(data):
     header_len = struct.calcsize(MESSAGE_RECV_HEADER_FMT)
     end_len = struct.calcsize(MESSAGE_END_FMT)
 
+    # TODO: Do we need to check the return code?
     _, seqno, cmd, _, retcode = struct.unpack(
         MESSAGE_RECV_HEADER_FMT, data[:header_len]
     )
@@ -218,23 +221,25 @@ class MessageDispatcher(ContextualLogger):
     # other messages. This is a hack to allow waiting for heartbeats.
     HEARTBEAT_SEQNO = -100
 
-    def __init__(self, dev_id, listener):
+    def __init__(self, dev_id, listener, tuya_packeter):
         """Initialize a new MessageBuffer."""
         super().__init__()
         self.buffer = b""
+        
         self.listeners = {}
+        self.listeners_data = {}
         self.listener = listener
+        
+        self.packeter = tuya_packeter
+
         self.set_logger(_LOGGER, dev_id)
 
     def abort(self):
         """Abort all waiting clients."""
         for key in self.listeners:
-            sem = self.listeners[key]
-            self.listeners[key] = None
-
-            # TODO: Received data and semahore should be stored separately
-            if isinstance(sem, asyncio.Semaphore):
-                sem.release()
+            self.listeners[key].release()
+            del self.listeners[key]
+            del self.listeners_data[key]
 
     async def wait_for(self, seqno, timeout=5):
         """Wait for response to a sequence number to be received and return it."""
@@ -243,74 +248,63 @@ class MessageDispatcher(ContextualLogger):
 
         self.debug("Waiting for sequence number %d", seqno)
         self.listeners[seqno] = asyncio.Semaphore(0)
+        self.listeners_data[seqno] = None
+
         try:
             await asyncio.wait_for(self.listeners[seqno].acquire(), timeout=timeout)
         except asyncio.TimeoutError:
             del self.listeners[seqno]
+            del self.listeners_data[seqno]
             raise
 
-        return self.listeners.pop(seqno)
+        self.listeners.pop(seqno)
+        return self.listeners_data.pop(seqno)
 
     def add_data(self, data):
         """Add new data to the buffer and try to parse messages."""
         self.buffer += data
-        header_len = struct.calcsize(MESSAGE_RECV_HEADER_FMT)
 
         while self.buffer:
             # Check if enough data for measage header
-            if len(self.buffer) < header_len:
+            if len(self.buffer) < TUYA_HEADER_RCV_SIZE:
                 break
 
             # Parse header and check if enough data according to length in header
-            _, seqno, cmd, length, retcode = struct.unpack_from(
-                MESSAGE_RECV_HEADER_FMT, self.buffer
-            )
-            if len(self.buffer[header_len - 4 :]) < length:
+            _, seqno, cmd, length, retcode = struct.unpack_from(MESSAGE_RECV_HEADER_FMT, self.buffer)
+
+            if len(self.buffer) - TUYA_HEADER_SIZE < length:
                 break
 
-            # length includes payload length, retcode, crc and suffix
-            if (retcode & 0xFFFFFF00) != 0:
-                payload_start = header_len - 4
-                payload_length = length - struct.calcsize(MESSAGE_END_FMT)
-            else:
-                payload_start = header_len
-                payload_length = length - 4 - struct.calcsize(MESSAGE_END_FMT)
-            payload = self.buffer[payload_start : payload_start + payload_length]
+            packet = self.packeter.unpack_message(self.buffer[: TUYA_HEADER_SIZE + length])
 
-            crc, _ = struct.unpack_from(
-                MESSAGE_END_FMT,
-                self.buffer[payload_start + payload_length : payload_start + length],
-            )
-
-            self.buffer = self.buffer[header_len - 4 + length :]
-            self._dispatch(TuyaMessage(seqno, cmd, retcode, payload, crc))
+            self.buffer = self.buffer[TUYA_HEADER_SIZE + length :]
+            self._dispatch(packet)
 
     def _dispatch(self, msg):
         """Dispatch a message to someone that is listening."""
         self.debug("Dispatching message %s", msg)
+
         if msg.seqno in self.listeners:
             self.debug("Dispatching sequence number %d", msg.seqno)
-            sem = self.listeners[msg.seqno]
-            self.listeners[msg.seqno] = msg
-            sem.release()
+            self.listeners_data[msg.seqno] = msg
+            self.listeners[msg.seqno].release()
+
+        # Display some known messages even though there is no listener for them
         elif msg.cmd == 0x09:
-            self.debug("Got heartbeat response")
+            self.debug("Got heartbeat response (with no listener)")
             if self.HEARTBEAT_SEQNO in self.listeners:
-                sem = self.listeners[self.HEARTBEAT_SEQNO]
-                self.listeners[self.HEARTBEAT_SEQNO] = msg
-                sem.release()
+                self.listeners_data[self.HEARTBEAT_SEQNO] = msg
+                self.listeners[self.HEARTBEAT_SEQNO].release()
+
         elif msg.cmd == 0x12:
-            self.debug("Got normal updatedps response")
+            self.debug("Got normal updatedps response (with no listener)")
+
         elif msg.cmd == 0x08:
-            self.debug("Got status update")
+            self.debug("Got status update (with no listener)")
             self.listener(msg)
+
         else:
-            self.debug(
-                "Got message type %d for unknown listener %d: %s",
-                msg.cmd,
-                msg.seqno,
-                msg,
-            )
+            self.debug("Got message type %d for unknown listener %d: %s", msg.cmd, msg.seqno, msg,)
 
 
 class TuyaListener(ABC):
@@ -373,6 +367,8 @@ class TuyaProtocol(asyncio.Protocol, ContextualLogger):
             if "dps" in decoded_message:
                 self.dps_cache.update(decoded_message["dps"])
 
+            # If bool(self.listener) == false -> return self.listener, if bool(self.listener) == true -> return self.listener()
+            # Ehhh? Basicaly returns self.listener()? Kinda double checking the same stuff
             listener = self.listener and self.listener()
             if listener is not None:
                 listener.status_updated(self.dps_cache)
@@ -415,6 +411,8 @@ class TuyaProtocol(asyncio.Protocol, ContextualLogger):
         """Disconnected from device."""
         self.debug("Connection lost: %s", exc)
         try:
+            # If bool(self.listener) == false -> return self.listener, if bool(self.listener) == true -> return self.listener()
+            # Ehhh? Basicaly returns self.listener()? Kinda double checking the same stuff
             listener = self.listener and self.listener()
             if listener is not None:
                 listener.disconnected()
@@ -450,17 +448,14 @@ class TuyaProtocol(asyncio.Protocol, ContextualLogger):
         dev_type = self.dev_type
 
         # Wait for special sequence number if heartbeat
-        seqno = (
-            MessageDispatcher.HEARTBEAT_SEQNO
-            if command == HEARTBEAT
-            else (self.seqno - 1)
-        )
+        seqno = MessageDispatcher.HEARTBEAT_SEQNO if command == HEARTBEAT else (self.seqno - 1)
 
         self.transport.write(payload)
         msg = await self.dispatcher.wait_for(seqno)
-        if msg is None:
-            self.debug("Wait was aborted for seqno %d", seqno)
-            return None
+        # Does not return none - timeout raises exception
+        # if msg is None:
+        #     self.debug("Wait was aborted for seqno %d", seqno)
+        #     return None
 
         # TODO: Verify stuff, e.g. CRC sequence number?
         payload = self._decode_payload(msg.payload)
@@ -531,8 +526,7 @@ class TuyaProtocol(asyncio.Protocol, ContextualLogger):
         ranges = [(2, 11), (11, 21), (21, 31), (100, 111)]
 
         for dps_range in ranges:
-            # dps 1 must always be sent, otherwise it might fail in case no dps is found
-            # in the requested range
+            # dps 1 must always be sent, otherwise it might fail in case no dps is found in the requested range
             self.dps_to_request = {"1": None}
             self.add_dps_to_request(range(*dps_range))
             try:
